@@ -20,9 +20,9 @@ CHECKPOINT_PATH = 'checkpoint'
 PRE_18_CHECKPOINT_PATH = "/home/zigangzhao/DMS/pytorch-cifar100/pretrain-model/resnet18-5c106cde.pth"
 PRE_50_CHECKPOINT_PATH = "/home/zigangzhao/DMS/pytorch-cifar100/pretrain-model/resnet50-19c8e357.pth"
 #total training epoches
-EPOCH = 30
+EPOCH = 90 
 # MILESTONES = [60, 120, 160]
-MILESTONES = [10, 20, 25]
+MILESTONES = [30, 50, 70]
 
 #initial learning rate
 #INIT_LR = 0.1
@@ -35,6 +35,11 @@ LOG_DIR = 'runs'
 
 #save weights file per SAVE_EPOCH epoch
 SAVE_EPOCH = 10
+
+##test_images_path
+TSET_IMAGE = "/home/zigangzhao/DMS/dms-2/test_images/"
+
+BASE = "/home/zigangzhao/DMS/dms-2/output/"
 
 
 
