@@ -12,8 +12,16 @@ import os
 import sys
 import argparse
 from datetime import datetime
+from torch.backends import cudnn
+
+BASE_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
+sys.path.append(BASE_DIR)
 
 import numpy as np
+import math
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -21,58 +29,86 @@ import torchvision
 import torchvision.transforms as transforms
 import torch.nn.functional as F
 
+
 import torchvision.models as models
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from conf import settings
+from models.resnet50 import resnet50, resnet18
+from models.vgg16 import vgg16, vgg16_bn
+from torch.hub import load_state_dict_from_url
 from utils import get_network, get_training_dataloader, get_test_dataloader, WarmUpLR
+from data_augmentation import mixup_data, mixup_criterion, LabelSmoothCEloss, cutmix
 
-# class Net(nn.Module):
-#     def __init__(self):
-#         super(Net, self).__init__()
-#         self.conv1 = nn.Conv2d(3, 10, kernel_size=5)
-#         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-#         self.conv2_drop = nn.Dropout2d()
-#         self.fc1 = nn.Linear(320, 50) #20*4*4
-#         self.fc2 = nn.Linear(50, 24)
 
-#     def forward(self, x):
-#         x = F.relu(F.max_pool2d(self.conv1(x), 2))
-#         x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        
-#         #print(x.size())
-#         #x = x.view(x.size()[0],-1)
-#         x = x.view(-1, 320)
-#         x = F.relu(self.fc1(x))
-#         x = F.dropout(x, training=self.training)
-#         x = self.fc2(x)
-#         return x
+##set random seed
+seed = 3
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed) # 为CPU设置随机种子
+torch.cuda.manual_seed(seed)    # 为当前GPU设置随机种子
+torch.cuda.manual_seed_all(seed)  # 为所有GPU设置随机种子
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 
 
 def train(epoch):
     
     train_loss = 0.0 # cost function error
     correct = 0.0
+    ##use mixup
+    ismixup = True
+    iscutmix = False
+    r = np.random.rand(1)
 
     net.train().cuda()
     for batch_index, (images, labels) in enumerate(training_loader):
         if epoch <= args.warm:
             warmup_scheduler.step()
         # print(images, labels)
+        if ismixup:
+            inputs, targets_a, targets_b, lam = mixup_data(images.cuda(), labels.cuda(), alpha=1.0)
 
-        labels = labels.cuda()
-        images = images.cuda()
+            optimizer.zero_grad()
+            outputs = net(inputs)
+                       
+            _, preds = outputs.max(1)
+            correct += lam * preds.eq(targets_a).sum() + (1-lam) * preds.eq(targets_b).sum()
+            
+            loss = mixup_criterion(loss_function, outputs, targets_a, targets_b, lam)
+            loss.backward()
+            optimizer.step()
 
-        optimizer.zero_grad()
-        # net = net.cuda()
-        outputs = net(images)
+        if r < args.cutmix_prob and iscutmix:
+            inputs, targets_a, targets_b, lam = cutmix(images.cuda(), labels.cuda(), alpha=1.0)
+            
+            optimizer.zero_grad()
+            outputs = net(inputs)
+                       
+            _, preds = outputs.max(1)
+            correct += lam * preds.eq(targets_a).sum() + (1-lam) * preds.eq(targets_b).sum()
+            
+            loss = mixup_criterion(loss_function, outputs, targets_a, targets_b, lam)
+            loss.backward()
+            optimizer.step()
 
-        _, preds = outputs.max(1)
-        correct += preds.eq(labels).sum()
 
-        loss = loss_function(outputs, labels)
-        loss.backward()
-        optimizer.step()
+        else:
+            labels = labels.cuda()
+            images = images.cuda()
+
+            optimizer.zero_grad()
+            # net = net.cuda()
+            outputs = net(images)
+
+            _, preds = outputs.max(1)
+            correct += preds.eq(labels).sum()
+
+            loss = loss_function(outputs, labels)
+            loss.backward()
+            optimizer.step()
 
 
         print('Training Epoch: [ {epoch} || [{trained_samples}/{total_samples}]\t || Loss: {:0.4f}\t || LR: {:0.6f} ]'.format(
@@ -89,10 +125,10 @@ def train(epoch):
     training_acc = float(correct.float() / len(training_loader.dataset))
     loss_train.append(training_loss)
     acc_train.append(training_acc)
-    print(loss_train,acc_train)
+    #print(loss_train,acc_train)
 
     print('[train set: Average loss: {:.4f} || Accuracy: {:.4f}]'.format(
-        training_loss,training_acc))
+        training_loss, training_acc))
   
 
 def eval_training(epoch):
@@ -102,9 +138,9 @@ def eval_training(epoch):
     test_loss = 0.0 # cost function error
     correct = 0.0
 
-
+   
     for (images, labels) in test_loader:
-
+       
         images = images.cuda()
         labels = labels.cuda()
         # net = net.cuda()
@@ -113,7 +149,9 @@ def eval_training(epoch):
         test_loss += loss.item()
         _, preds = outputs.max(1)
         correct += preds.eq(labels).sum()
-
+        # print(correct)
+        
+   
     print('[Test set: Average loss: {:.4f} || Accuracy: {:.4f}]'.format(
         test_loss / len(test_loader.dataset),
         correct.float() / len(test_loader.dataset)
@@ -121,7 +159,7 @@ def eval_training(epoch):
   
     loss_test.append(test_loss / len(test_loader.dataset))
     acc_test.append(float(correct.float() / len(test_loader.dataset)))
-    print(loss_test,acc_test)
+    #print(loss_test,acc_test)
     return correct.float() / len(test_loader.dataset)
 
 if __name__ == '__main__':
@@ -129,24 +167,37 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--net', type=str, required=True, help='net type')
     parser.add_argument('--gpu', type=bool, default=True, help='use gpu or not')
-    parser.add_argument('--numworks', type=int, default=8, help='number of workers for dataloader')
-    parser.add_argument('--batch-size', type=int, default=256, help='batch size for dataloader')
+    parser.add_argument('--numworks', type=int, default=6, help='number of workers for dataloader')
+    parser.add_argument('--batch-size', type=int, default=32, help='batch size for dataloader')
     parser.add_argument('--shuffle', type=bool, default=True, help='whether shuffle the dataset')
-    parser.add_argument('--warm', type=int, default=1, help='warm up training phase')
+    parser.add_argument('--warm', type=int, default=5, help='warm up training phase')
     parser.add_argument('--lr', type=float, default=0.01, help='initial learning rate')
+    parser.add_argument('--cutmix_prob', default=0.5, type=float, help='cutmix probability')
     args = parser.parse_args()
    
     ##load pretrain model
-    # pretrain_model = settings.PRE_18_CHECKPOINT_PATH   
-    # net = get_network(args, use_gpu=args.gpu)     
-    # net.load_state_dict(torch.load(pretrain_model))  
+    # pretrain_model = settings.PRE_50_CHECKPOINT_PATH   
+    # # net = get_network(args, use_gpu=args.gpu)
+    # net = resnet50()
+    # #state_dict = load_state_dict_from_url(pretrain_model)
+    # state_dict = torch.load(pretrain_model)
+    # net.load_state_dict(state_dict) 
+    # net.fc = torch.nn.Linear(2048, 4)
+ 
 
     ##or
-    resnet18 = models.resnet18(pretrained=True)
-    resnet18.fc = torch.nn.Linear(512, 24)
-    net = resnet18
-    # net = Net()
+    # resnet18 = models.resnet18(pretrained=True)
+    # resnet18.fc = torch.nn.Linear(512, 5)
+    # net = resnet18
 
+    # vgg16_bn = vgg16_bn(pretrained=True)
+    # vgg16_bn.classifier[6] = nn.Linear(in_features=4096, out_features=5, bias=True)
+    # print(vgg16_bn.classifier)
+    # net = vgg16_bn
+   
+    resnet50 = models.resnet50(pretrained=True)
+    resnet50.fc = torch.nn.Linear(2048, 5)
+    net = resnet50
 
     # print("load success!!")
     #data preprocessing:
@@ -163,11 +214,16 @@ if __name__ == '__main__':
         )
     
     loss_function = nn.CrossEntropyLoss()
+    loss_function1 = LabelSmoothCEloss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     train_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=settings.MILESTONES, gamma=0.2) #learning rate decay
     iter_per_epoch = len(training_loader)
     warmup_scheduler = WarmUpLR(optimizer, iter_per_epoch * args.warm)
     checkpoint_path = os.path.join(settings.CHECKPOINT_PATH, args.net, settings.TIME_NOW)
+
+    #### warm_up_with_cosine_lr
+    warm_up_with_cosine_lr = lambda epoch: epoch / args.warm if epoch <= args.warm else 0.5 * ( math.cos((epoch - args.warm) /(settings.EPOCH - args.warm) * math.pi) + 1)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warm_up_with_cosine_lr)
    
     #create checkpoint folder to save model
     if not os.path.exists(checkpoint_path):
@@ -181,12 +237,14 @@ if __name__ == '__main__':
     acc_train = []
     loss_test = []
     acc_test = []
+    
+    # acc = eval_training(1)
 
-    for epoch in range(1, settings.EPOCH):
+
+    for epoch in range(1, settings.EPOCH+1):
         if epoch > args.warm:
-            train_scheduler.step(epoch)
+            scheduler.step(epoch)
 
-        # eval_training(epoch)
         train(epoch)
         # eval_training(epoch)
         acc = eval_training(epoch)
@@ -194,13 +252,15 @@ if __name__ == '__main__':
         #start to save best performance model after learning rate decay to 0.01 
         if epoch > settings.MILESTONES[0] and best_acc < acc:
             best_acc = acc
-            torch.save(net.state_dict(), checkpoint_path.format(net=args.net, epoch=epoch, type='best-{}'.format(best_acc)))         
+            torch.save(net.state_dict(), checkpoint_path.format(net=args.net, epoch=epoch, type='best-{}'.format(best_acc)))
+           # torch.save(net, checkpoint_path.format(net=args.net, epoch=epoch, type='best-{}'.format(best_acc)))          
             continue
 
         if not epoch % settings.SAVE_EPOCH:
             torch.save(net.state_dict(), checkpoint_path.format(net=args.net, epoch=epoch, type='regular-{}'.format(acc)))
+            #torch.save(net, checkpoint_path.format(net=args.net, epoch=epoch, type='regular-{}'.format(acc)))
 
-    # writer.close()
+
 
 # import matplotlib.pyplot as plt
 # import numpy as np
@@ -213,26 +273,16 @@ if __name__ == '__main__':
 
 ax1 = plt.subplot()
 ax2 = ax1.twinx() #shared x axis with each other
-ax1.plot(np.arange(1, len(loss_train)+1), loss_train, color = 'g', label = 'train loss', linestyle = '-', linewidth = 2)
-ax1.plot(np.arange(1, len(loss_test )+1), loss_test, color = 'b', label = 'test loss', linestyle = '-', linewidth = 2)
-ax2.plot(np.arange(1, len(acc_train)+1), acc_train, color = 'g', label = 'train acc', linestyle = '-', linewidth = 2)
-ax2.plot(np.arange(1, len(acc_test)+1), acc_test, color = 'b', label = 'test acc', linestyle = '-', linewidth = 2)
+ax1.plot(np.arange(1, len(loss_train) + 1), loss_train, color = 'g', label = 'train loss', linestyle = '-', linewidth = 2)
+ax1.plot(np.arange(1, len(loss_test ) + 1), loss_test, color = 'b', label = 'test loss', linestyle = '-', linewidth = 2)
+ax2.plot(np.arange(1, len(acc_train) + 1), acc_train, color = 'g', label = 'train acc', linestyle = '-', linewidth = 2)
+ax2.plot(np.arange(1, len(acc_test) + 1), acc_test, color = 'b', label = 'test acc', linestyle = '-', linewidth = 2)
 
-ax1.legend(loc=(0.7,0.7))  #使用二元组(0.7,0.8)定义标签位置
-ax2.legend(loc=(0.7,0.5))
+ax1.legend(loc=(0.7, 0.7))  #使用(0.7,0.7)定义标签位置
+ax2.legend(loc=(0.7, 0.5))
 ax1.set_xlabel('epoch')
 ax1.set_ylabel('loss')
 ax2.set_ylabel('accuracy')
 plt.savefig("output/a.png", dpi = 400)
 plt.show()
 
-# plot中画线的颜色通常是八种：
-# 标记符     颜色
-# r               红
-# g              绿
-# b              蓝
-# c              蓝绿
-# m            紫红
-# y              黄
-# k              黑
-# w             白
