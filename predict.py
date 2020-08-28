@@ -2,6 +2,7 @@
 code by zzg 2020-07-01
 predict single image
 """
+##test
 ###预测2类示例
 
 try:
