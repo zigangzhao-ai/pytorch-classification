@@ -137,8 +137,7 @@ def eval_training(epoch):
 
     test_loss = 0.0 # cost function error
     correct = 0.0
-
-   
+ 
     for (images, labels) in test_loader:
        
         images = images.cuda()
@@ -149,9 +148,7 @@ def eval_training(epoch):
         test_loss += loss.item()
         _, preds = outputs.max(1)
         correct += preds.eq(labels).sum()
-        # print(correct)
-        
-   
+        # print(correct)      
     print('[Test set: Average loss: {:.4f} || Accuracy: {:.4f}]'.format(
         test_loss / len(test_loader.dataset),
         correct.float() / len(test_loader.dataset)
@@ -176,16 +173,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
    
     ##load pretrain model
-    # pretrain_model = settings.PRE_50_CHECKPOINT_PATH   
-    # # net = get_network(args, use_gpu=args.gpu)
-    # net = resnet50()
-    # #state_dict = load_state_dict_from_url(pretrain_model)
-    # state_dict = torch.load(pretrain_model)
-    # net.load_state_dict(state_dict) 
-    # net.fc = torch.nn.Linear(2048, 4)
- 
 
-    ##or
     # resnet18 = models.resnet18(pretrained=True)
     # resnet18.fc = torch.nn.Linear(512, 5)
     # net = resnet18
@@ -239,7 +227,6 @@ if __name__ == '__main__':
     acc_test = []
     
     # acc = eval_training(1)
-
 
     for epoch in range(1, settings.EPOCH+1):
         if epoch > args.warm:

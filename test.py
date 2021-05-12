@@ -11,7 +11,6 @@ code by zzg 2020-06-11
 
 import argparse
 #from dataset import *
-
 #from skimage import io
 from matplotlib import pyplot as plt
 
@@ -42,9 +41,7 @@ if __name__ == '__main__':
     net = resnet18
 
     # net = get_network(args)
-
     test_loader = get_test_dataloader(
-
         num_workers=args.num,
         batch_size=args.batch_size,
         shuffle=args.shuffle
@@ -53,6 +50,7 @@ if __name__ == '__main__':
     net.load_state_dict(torch.load(args.weights), args.gpu)
     print(net)
     net.eval()
+    net = net.cuda()
 
     correct_1 = 0.0
     correct_5 = 0.0
@@ -66,16 +64,12 @@ if __name__ == '__main__':
     label_names = ["call","fenxin","normal","smoke","tired"]
 
     for n_iter, (image, label) in enumerate(test_loader):
-  
         # print("iteration: {}\t total {} iterations".format(n_iter + 1, len(test_loader)))
         image = image.cuda()
         label0 = label.cuda()
-        net = net.cuda()
         output = net(image)
         # print(output)
         # print(label0)
-        
-
         _, pred = output.topk(5, 1, largest=True, sorted=True)
         # print(pred)
 
@@ -84,7 +78,6 @@ if __name__ == '__main__':
 
         #compute top 5
         correct_5 += correct[:, :5].sum()
-
         #compute top1 
         correct_1 += correct[:, :1].sum()
 
@@ -96,24 +89,9 @@ if __name__ == '__main__':
 
     report = classification_report(lbllist.numpy(), predlist.numpy(), target_names=label_names,
                                    digits=2)
-
-    
+  
     print("Top 1 err: {:.3}%".format((1 - correct_1 / len(test_loader.dataset))*100))
     print("Top 5 err: {:.3}%".format((1 - correct_5 / len(test_loader.dataset))*100))
     print(report)
 
     print("Parameter numbers: {}".format(sum(p.numel() for p in net.parameters())))
-
-
-    # draw P-R curve   
-    # plt.figure(1) 
-    # plt.title('Precision/Recall Curve')# give plot a title
-    # plt.xlabel('Recall')# make axis labels
-    # plt.ylabel('Precision')
-    # y_true = lbllist.numpy()
-    # y_scores = predlist1.numpy()
-    # precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
-    # plt.figure(1)
-    # plt.plot(precision, recall)
-    # plt.show()
-    # plt.savefig('p-r.png')
