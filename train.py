@@ -9,15 +9,12 @@ training by resnet50
 """
 
 import os
+import re
 import sys
 import argparse
 from datetime import datetime
 from torch.backends import cudnn
 
-BASE_DIR = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))))
-sys.path.append(BASE_DIR)
 
 import numpy as np
 import math
@@ -35,11 +32,10 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from conf import settings
-from models.resnet50 import resnet50, resnet18
-from models.vgg16 import vgg16, vgg16_bn
+from models.resnet import resnet50, resnet18
 from torch.hub import load_state_dict_from_url
-from utils import get_network, get_training_dataloader, get_test_dataloader, WarmUpLR
-from data_augmentation import mixup_data, mixup_criterion, LabelSmoothCEloss, cutmix
+from data.utils import get_network, get_training_dataloader, get_test_dataloader, WarmUpLR
+from data.data_augmentation import mixup_data, mixup_criterion, LabelSmoothCEloss, cutmix
 
 
 ##set random seed
@@ -53,17 +49,15 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 
-
 def train(epoch):
     
     train_loss = 0.0 # cost function error
     correct = 0.0
     ##use mixup
-    ismixup = True
+    ismixup = False
     iscutmix = False
     r = np.random.rand(1)
 
-    net.train().cuda()
     for batch_index, (images, labels) in enumerate(training_loader):
         if epoch <= args.warm:
             warmup_scheduler.step()
@@ -94,13 +88,12 @@ def train(epoch):
             loss.backward()
             optimizer.step()
 
-
         else:
-            labels = labels.cuda()
-            images = images.cuda()
+            labels = labels.to(device)
+            images = images.to(device)
 
             optimizer.zero_grad()
-            # net = net.cuda()
+
             outputs = net(images)
 
             _, preds = outputs.max(1)
@@ -131,9 +124,9 @@ def train(epoch):
         training_loss, training_acc))
   
 
-def eval_training(epoch):
+def eval_training():
     
-    net.eval().cuda()
+    net.eval().to(device)
 
     test_loss = 0.0 # cost function error
     correct = 0.0
@@ -159,33 +152,26 @@ def eval_training(epoch):
     #print(loss_test,acc_test)
     return correct.float() / len(test_loader.dataset)
 
+
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--net', type=str, required=True, help='net type')
-    parser.add_argument('--gpu', type=bool, default=True, help='use gpu or not')
-    parser.add_argument('--numworks', type=int, default=6, help='number of workers for dataloader')
+    parser.add_argument('--net', type=str, default='resnet50', help='net type') #required=True,
+    parser.add_argument('--numworks', type=int, default=0, help='number of workers for dataloader')
     parser.add_argument('--batch-size', type=int, default=32, help='batch size for dataloader')
     parser.add_argument('--shuffle', type=bool, default=True, help='whether shuffle the dataset')
     parser.add_argument('--warm', type=int, default=5, help='warm up training phase')
     parser.add_argument('--lr', type=float, default=0.01, help='initial learning rate')
-    parser.add_argument('--cutmix_prob', default=0.5, type=float, help='cutmix probability')
+    parser.add_argument('--cutmix-prob', default=0.5, type=float, help='cutmix probability')
     args = parser.parse_args()
-   
+
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ##load pretrain model
-
-    # resnet18 = models.resnet18(pretrained=True)
-    # resnet18.fc = torch.nn.Linear(512, 5)
-    # net = resnet18
-
-    # vgg16_bn = vgg16_bn(pretrained=True)
-    # vgg16_bn.classifier[6] = nn.Linear(in_features=4096, out_features=5, bias=True)
-    # print(vgg16_bn.classifier)
-    # net = vgg16_bn
-   
     resnet50 = models.resnet50(pretrained=True)
-    resnet50.fc = torch.nn.Linear(2048, 5)
+    resnet50.fc = torch.nn.Linear(2048, 2)
     net = resnet50
+    net = net.to(device)
 
     # print("load success!!")
     #data preprocessing:
@@ -227,7 +213,6 @@ if __name__ == '__main__':
     acc_test = []
     
     # acc = eval_training(1)
-
     for epoch in range(1, settings.EPOCH+1):
         if epoch > args.warm:
             scheduler.step(epoch)
@@ -246,7 +231,6 @@ if __name__ == '__main__':
         if not epoch % settings.SAVE_EPOCH:
             torch.save(net.state_dict(), checkpoint_path.format(net=args.net, epoch=epoch, type='regular-{}'.format(acc)))
             #torch.save(net, checkpoint_path.format(net=args.net, epoch=epoch, type='regular-{}'.format(acc)))
-
 
 
 # import matplotlib.pyplot as plt
