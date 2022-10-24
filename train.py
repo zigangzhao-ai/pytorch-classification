@@ -126,15 +126,15 @@ def train(epoch):
 
 def eval_training():
     
-    net.eval().to(device)
+    net.eval()
 
     test_loss = 0.0 # cost function error
     correct = 0.0
  
     for (images, labels) in test_loader:
        
-        images = images.cuda()
-        labels = labels.cuda()
+        images = images.to(device)
+        labels = labels.to(device)
         # net = net.cuda()
         outputs = net(images)
         loss = loss_function(outputs, labels)
@@ -219,7 +219,7 @@ if __name__ == '__main__':
 
         train(epoch)
         # eval_training(epoch)
-        acc = eval_training(epoch)
+        acc = eval_training()
 
         #start to save best performance model after learning rate decay to 0.01 
         if epoch > settings.MILESTONES[0] and best_acc < acc:
